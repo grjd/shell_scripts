@@ -92,10 +92,14 @@ def getpvidfromexam(df, idex):
 	"""
 	#find idex cell in datframe, return id subject and year
 	#qqq = df.query('A == 2')['B']
-	yearswithMRI = ['MRI_v1','MRI_v2','MRI_v3','MRI_v4','MRI_v5','MRI_v6']
+	yearswithMRI = ['MRI_v1','MRI_v2','MRI_v3','MRI_v4','MRI_v5','MRI_v6', 'MRI_v7']
 
 	idy = list()
+	# there is weird ' ' char in MRI_v6 coerce to do not have error
+	df['MRI_v6'] = pd.to_numeric(df['MRI_v6'], errors='coerce')
 	for visit in yearswithMRI:
+		print('Visit testing:', visit )
+		#print (df['MRI_v6'][ pd.to_numeric(df['MRI_v6'], errors='coerce').isnull()])
 		inyear = df[visit].dropna().astype(int).where(df[visit] == int(idex))
 		isinyear = inyear.first_valid_index()
 		if isinyear >=0:
@@ -123,7 +127,8 @@ def pipeline_pacs(pacs_path, nifti_path):
 	# YYYY/MM/DD/EEEE year/month/dat/exam
 	#nifti_path = "/Users/jaime/Downloads/ftp-0120-0127/niftis"
 	# open csv
-	csv_f = pd.read_csv("~/vallecas/data/BBDD_vallecas/Info_MRI.csv")
+	#csv_f = pd.read_csv("~/vallecas/data/BBDD_vallecas/Info_MRI.csv")
+	csv_f = pd.read_csv("~/vallecas/data/BBDD_vallecas/VisitasMRIexams.csv")
 	# read exams from pacs _path
 	listyears = [name for name in os.listdir(pacs_path) if os.path.isdir(os.path.join(pacs_path, name)) ]
 	#[x[0] for x in os.walk(pacs_path)] 
@@ -154,33 +159,35 @@ def pipeline_pacs(pacs_path, nifti_path):
 										print('				---->Processing year:',y, ' month:', m, ' day:', day, ' exams:',listexams)
 										# convert tar into dcm into nifti
 										for idex in listexams:
-											
-											#untar all .tar in idex
-											exampath = os.path.join(day_path, idex)
-											tarfiles = list()
-											# get all tar files
-											for file in os.listdir(exampath):
-												if file.endswith(".tar"):
-													tarfiles.append(file) 
-													tarf = os.path.join(exampath,file)
-													print('Calling to tar -zxvf $filename:',tarf, '-C $outputdir:',exampath)	
-													tar_command = check_output(['tar','-zxvf', tarf, '-C', exampath])
-											# get pv id from csv
-											
 											print('Calling to getpvidfromexam yyyy::mm::dd::exam ->',y,m,day,idex)
+											
+											if idex.isdigit() is False:
+												print('Skipping directory:', idex, ' Expected id exam \n')	
+												continue
 											pv_id_type_y = getpvidfromexam(csv_f, idex)
 											if len(pv_id_type_y) > 0:
+
+												# untar all .tar in idex
+												exampath = os.path.join(day_path, idex)
+												tarfiles = list()
+												# get all tar files
+												for file in os.listdir(exampath):
+													if file.endswith(".tar"):
+														tarfiles.append(file) 
+														tarf = os.path.join(exampath,file)
+														print('Calling to tar -zxvf $filename:',tarf, '-C $outputdir:',exampath)	
+														tar_command = check_output(['tar','-zxvf', tarf, '-C', exampath])
+												print('DONE tar -zxvf $filename:', exampath)
+												#pdb.set_trace()
 												subject = pv_id_type_y[0]
 												year = pv_id_type_y[1]
 												year = '_y' + str(year)
-												print('Calling to dcm2niix -o exampath -f sujeto exampath')
 												sujeto = subject + year
 												sujeto = sujeto + '_%f_%p'
-											
+												print('\n\n Calling to dcm2niix -o exampath -f sujeto exampath ....', sujeto,' \n')
 												dcm = check_output(['dcm2niix','-o', exampath, '-f', sujeto, exampath])
 												print(dcm)
 											
-												print('Copying nifti images to nifti directory:',nifti_path)
 												#get fMRI and 1 file and move
 												rs_str = exampath +'/*_fMRI_RESTING_S.nii.gz'
 												rs_file = glob.glob(rs_str)[0]
@@ -189,32 +196,41 @@ def pipeline_pacs(pacs_path, nifti_path):
 												t1_str = exampath + '/*SAG_3D_IR.nii.gz'
 												pv_id_t1 = pv_id + '.nii.gz'
 												t1_file = glob.glob(t1_str)[0]
-											
+												print('\n\n Copying nifti images to nifti directory:....',nifti_path)
 												copy1 = check_output(['cp', rs_file, os.path.join(nifti_path, pv_id_rs)])
 												copy2 = check_output(['cp', t1_file, os.path.join(nifti_path, pv_id_t1)])
+												print('\n\n Nifti images::',t1_file,' ', rs_file,' copied!!!')
+
 											else:
-												print('NOT found in Table Sipping!! yyyy::mm::dd::exam ->',y,m,day,idex)
-
-
-										# find the examin csv table
-										
-
-
+												print('NOT found in Table Skipping!! yyyy::mm::dd::exam ->',y,m,day,idex)
+												print('\n *** Deleting directory rm -r directory....\n')
+										print('Done with listexams:',listexams )			
+									else:
+										print('Skipping day:', str(day), ' expected DD')
 								else:
-									print('Skipping day:', day, ' expected DD')
-
+									print('Skipping expected day GOT directory:', str(day), '\n')
+							print('done with listdays:',listdays )
+						else:
+							print('Skipping month:', str(mm), ' expected MM')
+					else:
+						print('Skipping month:')
+				print('DONE with months', listmonths)
+			else:
+				print('Skipping year', str(y))
 		else:
-			print('Skipping directory:', y, ' expected YYYY')
-	pdb.set_trace()		
+			print('Skipping directory:',  str(y), ' expected YYYY')
+	print('DONE with years', listyears)
+	#pdb.set_trace()		
 		
 
-
-
 def main():
-	
+	#python -c 'import dicoms2nifti; dicoms2nifti.main()'|tee texto.txt
 	pacs_path = "/Users/jaime/Downloads/ftp-0120-0127"
+	pacs_path = "/Volumes/MacPart/test/"
 	nifti_path = "/Users/jaime/Downloads/ftp-0120-0127/niftis"
+	nifti_path = "/Volumes/MacPart/niftis"
 	pipeline_pacs(pacs_path, nifti_path)
+	print('pipeline_pacs FINISHED check to foind your niftis at:', nifti_path)
 	pdb.set_trace()
 	#SomeCommand 2>&1 | tee SomeFile.txt
 	#python -c 'import fsl_postprocessing; fsl_postprocessing.main()'|tee texto.txt
