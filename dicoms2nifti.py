@@ -113,7 +113,54 @@ def getpvidfromexam(df, idex):
 			idy = [format(inid, "04"), year]
 			return idy
 	print('NOT Found exam=', idex, ' in dataframe \n\n')
+	#pdb.set_trace()
 	return idy		
+
+def intersection(list1, list2):
+	return list(set(list1) & set(list2)) 
+
+def check_MRIs_in_filesystem(df, nifti_path):
+	"""check_MRIs_in_filesystem goes though dataframe in check if the nifti corresponding to each MRI
+	is beign created
+	"""
+	#describe the dataframe, number of mris per year
+	
+	import csv
+	print(df.describe())
+	yearswithMRI = ['MRI_v1','MRI_v2','MRI_v3','MRI_v4','MRI_v5','MRI_v6', 'MRI_v7']
+	found = list()
+	mrisdone = list()
+	for year in yearswithMRI: 
+		mris_series = df[year].notnull()
+		mris = np.sum(mris_series)
+
+		print('Year:', str(year),' MRIS total:', mris)
+		pvid = df['id'].astype(str).str[0:4]
+		pvid = 'pv_'+ pvid +'_y' + year[-1]
+		nifti_f = pvid[mris_series]
+		name = nifti_f+ '.nii.gz'
+		# loof for nifti_f.nii.gz in nifti_path
+		for root, dirs, files in os.walk(nifti_path):	
+			intersectioninyear = intersection(name.tolist(),files)
+			mrisdone.append(name.tolist())
+			differenceinyear = (set(name.tolist())^set(files))&set(name.tolist())
+			if intersectioninyear > 0:
+				found.append(intersectioninyear)
+				print('\t Found for Year',int(year[-1]) , ' ==', len(found[int(year[-1])-1]))
+				print('\n\n TOTAL for Year',int(year[-1]) , ' ==', len(mrisdone[int(year[-1])-1]), '\n')
+				print( len(found[int(year[-1])-1]),'/', len(mrisdone[int(year[-1])-1]), '\n\n')
+			# print the LOST MRIs			
+			print('***** Missing in YEAR:',int(year[-1]), ' ==' , differenceinyear, '\n')
+
+	#pdb.set_trace()
+	# with open('/Volumes/MacPart/test/found.csv', 'wb', newline='') as myfile:
+	# 	wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+	# 	wr.writerow(found)
+	# with open('/Volumes/MacPart/test/lost.csv', 'wb', newline='') as myfile:
+	# 	wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+	# 	wr.writerow(mrisdone)
+	# pdb.set_trace()
+
 
 def pipeline_pacs(pacs_path, nifti_path):
 	"""pipeline_pacs: get images with the pacs file systen yy/mm/dd calls to nicom2niix to generate nii.gz files
@@ -140,6 +187,7 @@ def pipeline_pacs(pacs_path, nifti_path):
 				# get the months
 				year_path = os.path.join(pacs_path, y)
 				listmonths = [month for month in os.listdir(year_path) if os.path.isdir(os.path.join(year_path, month)) ]
+				
 				# check MM format
 				for m in listmonths:
 					if str(m).isdigit() is True:
@@ -165,6 +213,8 @@ def pipeline_pacs(pacs_path, nifti_path):
 												print('Skipping directory:', idex, ' Expected id exam \n')	
 												continue
 											pv_id_type_y = getpvidfromexam(csv_f, idex)
+											# if pv_id_type_y nifti already created continue
+											
 											if len(pv_id_type_y) > 0:
 
 												# untar all .tar in idex
@@ -189,17 +239,25 @@ def pipeline_pacs(pacs_path, nifti_path):
 												print(dcm)
 											
 												#get fMRI and 1 file and move
-												rs_str = exampath +'/*_fMRI_RESTING_S.nii.gz'
-												rs_file = glob.glob(rs_str)[0]
+												t1_str = exampath + '/*SAG_3D_IR.nii.gz'
+												rs_str = exampath + '/*_fMRI_RESTING_S.nii.gz'
 												pv_id = 'pv_'+ subject + year 
 												pv_id_rs = pv_id + '_fmri' + '.nii.gz'
-												t1_str = exampath + '/*SAG_3D_IR.nii.gz'
+												
 												pv_id_t1 = pv_id + '.nii.gz'
-												t1_file = glob.glob(t1_str)[0]
 												print('\n\n Copying nifti images to nifti directory:....',nifti_path)
-												copy1 = check_output(['cp', rs_file, os.path.join(nifti_path, pv_id_rs)])
-												copy2 = check_output(['cp', t1_file, os.path.join(nifti_path, pv_id_t1)])
-												print('\n\n Nifti images::',t1_file,' ', rs_file,' copied!!!')
+												if len(glob.glob(t1_str)) > 0:
+													t1_file = glob.glob(t1_str)[0]
+													copy2 = check_output(['cp', t1_file, os.path.join(nifti_path, pv_id_t1)])
+													print('\n\n Nifti T1 image::',t1_file,' copied!!!')
+												else:
+													print('\n\n WARNING T1 file missing for :', t1_str, ' !!!')
+												if len(glob.glob(rs_str)) > 0:
+													rs_file = glob.glob(rs_str)[0]
+													copy1 = check_output(['cp', rs_file, os.path.join(nifti_path, pv_id_rs)])
+													print('\n\n Nifti rs image::', rs_file,' copied!!!')
+												else:
+													print('\n\n WARNING RS file missing for :', rs_str, ' !!!')
 
 											else:
 												print('NOT found in Table Skipping!! yyyy::mm::dd::exam ->',y,m,day,idex)
@@ -210,11 +268,26 @@ def pipeline_pacs(pacs_path, nifti_path):
 								else:
 									print('Skipping expected day GOT directory:', str(day), '\n')
 							print('done with listdays:',listdays )
+							#pdb.set_trace()
+							for dia in listdays:
+								dia2delete = os.path.join(month_path, dia)
+								if os.path.isdir(dia2delete) is True:
+									print('\n\n **** Removing dia::', dia2delete, ' \n\n')
+									remo = check_output(['rm', '-rf', dia2delete])
+									print('\n **** Removed dia::', dia2delete, ' \n')
 						else:
 							print('Skipping month:', str(mm), ' expected MM')
 					else:
 						print('Skipping month:')
 				print('DONE with months', listmonths)
+				print('\n\n ----- Removing months --- \n\n')
+				#pdb.set_trace()
+				# for mes in listmonths:
+				# 	monthpath2delete = os.path.join(year_path, mes)
+				# 	if os.path.isdir(monthpath2delete) is True:
+				# 		print('\n\n **** Removing month::', monthpath2delete, ' \n\n')
+				# 		remo = check_output(['rm', '-rf', monthpath2delete])
+				# 		print('\n **** Removed month::', monthpath2delete, ' \n')
 			else:
 				print('Skipping year', str(y))
 		else:
@@ -225,12 +298,20 @@ def pipeline_pacs(pacs_path, nifti_path):
 
 def main():
 	#python -c 'import dicoms2nifti; dicoms2nifti.main()'|tee texto.txt
+	#csv_f = pd.read_csv("~/vallecas/data/BBDD_vallecas/VisitasMRIexams.csv")
+	#getpvidfromexam(csv_f, '9555')
+	#check if all the mris that were done have their corresponding nifti 
+	#csv_f = pd.read_csv("~/vallecas/data/BBDD_vallecas/VisitasMRIexams.csv")
+	#nifti_path = "/Volumes/MacPart/niftis"
+	#check_MRIs_in_filesystem(csv_f, nifti_path)
+	#pdb.set_trace()
+
 	pacs_path = "/Users/jaime/Downloads/ftp-0120-0127"
 	pacs_path = "/Volumes/MacPart/test/"
 	nifti_path = "/Users/jaime/Downloads/ftp-0120-0127/niftis"
 	nifti_path = "/Volumes/MacPart/niftis"
 	pipeline_pacs(pacs_path, nifti_path)
-	print('pipeline_pacs FINISHED check to foind your niftis at:', nifti_path)
+	print('pipeline_pacs FINISHED check to find your niftis at:', nifti_path)
 	pdb.set_trace()
 	#SomeCommand 2>&1 | tee SomeFile.txt
 	#python -c 'import fsl_postprocessing; fsl_postprocessing.main()'|tee texto.txt
